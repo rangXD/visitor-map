@@ -155,6 +155,7 @@ const mom=(r,i)=>{if(i<1)return null;const b=val(r,i-1);return b>0?val(r,i)/b-1:
 const mlabel=i=>M[i].slice(0,4)+'.'+M[i].slice(4);
 const fmt=n=>n==null?'–':n>=1e8?(n/1e8).toFixed(n>=1e9?1:2)+'억':n>=1e4?Math.round(n/1e4).toLocaleString('ko-KR')+'만':Math.round(n).toLocaleString('ko-KR');
 const pct=p=>p==null?'–':(p>0?'+':'')+(p*100).toFixed(1)+'%';
+const SHORT={'11':'서울','26':'부산','27':'대구','28':'인천','29':'광주','30':'대전','31':'울산','36':'세종','41':'경기','43':'충북','44':'충남','46':'전남','47':'경북','48':'경남','50':'제주','51':'강원','52':'전북'};
 const typeLabel=()=>st.types.length===3?'전체':st.types.map(k=>TYPES[k]).join('+');
 const SEQ=['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#184f95','#0d366b'];
 const DIV=['#a8322b','#d9746b','#f2b9b2','#f0efec','#b7d3f6','#5598e7','#1c5cab'];
@@ -239,11 +240,12 @@ function showTip(r,latLng){
 }
 function pick(r){if(r.kind==='sido'&&map){zoomTo(r);return}st.sel=r;restyle();refreshPanel()}
 function zoomTo(r){
-  const f=(r.kind==='sgg'?fSgg:fSido).find(x=>x.properties.c===r.c);if(!f||!map){st.sel=r;refreshPanel();return}
-  const b=new kakao.maps.LatLngBounds();b.extend(new kakao.maps.LatLng(f.bb[1],f.bb[0]));b.extend(new kakao.maps.LatLng(f.bb[3],f.bb[2]));
+  if(!map){st.sel=r;refreshPanel();return}
+  const fs=r.kind==='sido'?fSgg.filter(f=>f.properties.sido===r.c&&!FAR.includes(f.properties.c)):fSgg.filter(f=>f.properties.c===r.c);
+  if(!fs.length)return;
+  const b=new kakao.maps.LatLngBounds();fs.forEach(f=>{b.extend(new kakao.maps.LatLng(f.bb[1],f.bb[0]));b.extend(new kakao.maps.LatLng(f.bb[3],f.bb[2]))});
   map.setBounds(b,20,20,20,20);
 }
-
 /* ---------- 패널 ---------- */
 function legend(){
   const el=document.getElementById('legend');
@@ -260,7 +262,7 @@ function sumRows(rs){const o=M.map(()=>[0,0,0]);rs.forEach(r=>r.v.forEach((x,i)=
 function viewName(){
   const vs=st.visible;if(!vs.length)return '보이는 지역 없음';
   if(vs.length===1)return vs[0].kind==='sgg'?sidoName[vs[0].s]+' '+vs[0].n:vs[0].n;
-  if(st.layer==='sido')return vs.length===D.sido.length?'전국':vs.slice(0,3).map(r=>r.n.replace(/(특별자치시|특별자치도|특별시|광역시|도)$/,'')).join('·')+(vs.length>3?` 외 ${vs.length-3}곳`:'');
+  if(st.layer==='sido')return vs.length===D.sido.length?'전국':vs.slice(0,3).map(r=>SHORT[r.c]).join('·')+(vs.length>3?` 외 ${vs.length-3}곳`:'');
   const sidos=[...new Set(vs.map(r=>r.s))];
   return sidos.length===1?`${sidoName[sidos[0]]} ${vs.length}개 시·군·구`:`${sidos.length}개 시·도의 ${vs.length}개 시·군·구`;
 }
@@ -306,7 +308,7 @@ function rank(){
   const ol=document.getElementById('rank');ol.innerHTML='';
   if(!rs.length){ol.innerHTML='<li style="cursor:default;color:var(--ink3)">지도를 움직여 지역이 보이게 해 주세요</li>';return}
   top.forEach((r,k)=>{const li=document.createElement('li');li.tabIndex=0;const kv=key(r);
-    li.innerHTML=`<span class="no">${k+1}</span><span class="nm">${r.kind==='sgg'&&new Set(st.visible.map(x=>x.s)).size>1?sidoName[r.s].replace(/(특별자치시|특별자치도|특별시|광역시|도)$/,'')+' ':''}${r.n}</span><span class="val">${st.metric==='yoy'?pct(yoy(r,i)):fmt(kv)}</span><span class="bar" style="width:${Math.max(2,Math.abs(kv)/mx*100)}%"></span>`;
+    li.innerHTML=`<span class="no">${k+1}</span><span class="nm">${r.kind==='sgg'&&new Set(st.visible.map(x=>x.s)).size>1?SHORT[r.s]+' ':''}${r.n}</span><span class="val">${st.metric==='yoy'?pct(yoy(r,i)):fmt(kv)}</span><span class="bar" style="width:${Math.max(2,Math.abs(kv)/mx*100)}%"></span>`;
     li.onclick=()=>pick(r);li.onkeydown=e=>{if(e.key==='Enter')pick(r)};ol.appendChild(li)});
 }
 function refreshPanel(){crumbs();side();rank()}
