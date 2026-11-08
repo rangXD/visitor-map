@@ -145,7 +145,7 @@ const M=D.months,NM=M.length,TYPES=['현지인','외지인','외국인'];
 const sidoRow={},sggRow={},sidoName={};
 D.sido.forEach(r=>{r.kind='sido';sidoRow[r.c]=r;sidoName[r.c]=r.n});
 D.sgg.forEach(r=>{r.kind='sgg';sggRow[r.c]=r});
-const SGG_LEVEL=10;           // 카카오맵 확대 단계가 이 값 이하이면 시·군·구로 보여줌
+const SGG_LEVEL=11;           // 카카오맵 확대 단계가 이 값 이하이면 시·군·구로 보여줌
 const FAR=['28720','47940'];  // 옹진군·울릉군: 전체 보기 범위 계산에서 제외
 const st={types:[0,1,2],metric:'abs',m:NM-1,layer:'sido',visible:[],sel:null,timer:null};
 
