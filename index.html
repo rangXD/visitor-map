@@ -60,6 +60,7 @@ h1{font-family:var(--f-display);font-size:30px;line-height:1.15;margin:0}
 .mixlab{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
 .mixlab i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
 .note{font-size:12px;color:var(--ink3);margin:6px 0 0}
+.backsum{font:inherit;font-size:12px;border:1px solid var(--line);background:transparent;color:var(--ink2);border-radius:6px;padding:2px 8px;cursor:pointer;margin-top:4px}
 .h3{font-size:12px;letter-spacing:.04em;color:var(--ink3);margin:12px 0 4px}
 #trend{width:100%;height:120px;display:block}
 .rank{list-style:none;margin:0;padding:0;display:grid;gap:2px}
@@ -82,7 +83,7 @@ button:focus-visible,input:focus-visible,.rank li:focus-visible{outline:2px soli
   <header>
     <div>
       <h1>대한민국 방문자 지도</h1>
-      <p class="sub">시·도와 시·군·구별로 한 달 동안 얼마나 많은 사람이 다녀갔는지 카카오맵 위에 보여줍니다.</p>
+      <p class="sub">지도를 움직이고 확대하면, 지금 화면에 보이는 지역의 방문자 통계가 오른쪽에 나옵니다.</p>
     </div>
     <div class="src">출처: 한국관광공사 데이터랩 지역별 방문자수<br>2024년 10월 ~ 2026년 9월</div>
   </header>
@@ -144,7 +145,9 @@ const M=D.months,NM=M.length,TYPES=['현지인','외지인','외국인'];
 const sidoRow={},sggRow={},sidoName={};
 D.sido.forEach(r=>{r.kind='sido';sidoRow[r.c]=r;sidoName[r.c]=r.n});
 D.sgg.forEach(r=>{r.kind='sgg';sggRow[r.c]=r});
-const st={types:[0,1,2],metric:'abs',m:NM-1,sido:null,sel:null,timer:null};
+const SGG_LEVEL=10;           // 카카오맵 확대 단계가 이 값 이하이면 시·군·구로 보여줌
+const FAR=['28720','47940'];  // 옹진군·울릉군: 전체 보기 범위 계산에서 제외
+const st={types:[0,1,2],metric:'abs',m:NM-1,layer:'sido',visible:[],sel:null,timer:null};
 
 const val=(r,i)=>{const v=r.v[i];let s=0;for(const k of st.types)s+=v[k];return s};
 const yoy=(r,i)=>{if(i<12)return null;const b=val(r,i-12);return b>0?val(r,i)/b-1:null};
@@ -152,24 +155,37 @@ const mom=(r,i)=>{if(i<1)return null;const b=val(r,i-1);return b>0?val(r,i)/b-1:
 const mlabel=i=>M[i].slice(0,4)+'.'+M[i].slice(4);
 const fmt=n=>n==null?'–':n>=1e8?(n/1e8).toFixed(n>=1e9?1:2)+'억':n>=1e4?Math.round(n/1e4).toLocaleString('ko-KR')+'만':Math.round(n).toLocaleString('ko-KR');
 const pct=p=>p==null?'–':(p>0?'+':'')+(p*100).toFixed(1)+'%';
+const typeLabel=()=>st.types.length===3?'전체':st.types.map(k=>TYPES[k]).join('+');
 const SEQ=['#cde2fb','#9ec5f4','#6da7ec','#3987e5','#256abf','#184f95','#0d366b'];
 const DIV=['#a8322b','#d9746b','#f2b9b2','#f0efec','#b7d3f6','#5598e7','#1c5cab'];
 const DIVB=[-0.2,-0.1,-0.03,0.03,0.1,0.2];
-const rows=()=>st.sido?D.sgg.filter(r=>r.s===st.sido):D.sido;
+const layerRows=()=>st.layer==='sgg'?D.sgg:D.sido;
+
+/* 지역별 대표점(가장 큰 조각의 중심)과 경계 상자 */
+function meta(f){
+  const g=f.geometry,polys=g.type==='Polygon'?[g.coordinates]:g.coordinates;
+  let best=null,ba=-1,bb=[180,90,-180,-90];
+  polys.forEach(p=>{let x0=180,y0=90,x1=-180,y1=-90;p[0].forEach(([x,y])=>{x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y)});
+    const a=(x1-x0)*(y1-y0);if(a>ba){ba=a;best=[(x0+x1)/2,(y0+y1)/2]}
+    bb=[Math.min(bb[0],x0),Math.min(bb[1],y0),Math.max(bb[2],x1),Math.max(bb[3],y1)]});
+  return {pt:best,bb,polys};
+}
+fSido.forEach(f=>Object.assign(f,meta(f)));fSgg.forEach(f=>Object.assign(f,meta(f)));
+
 let thresholds=[];
 function scale(){
   if(st.metric==='yoy')return p=>{if(p==null)return '#d9dde2';let k=0;for(const b of DIVB)if(p>=b)k++;return DIV[6-k]};
-  const all=[];rows().forEach(r=>{for(let i=0;i<NM;i++)all.push(val(r,i))});all.sort((a,b)=>a-b);
+  const all=[];layerRows().forEach(r=>{for(let i=0;i<NM;i++)all.push(val(r,i))});all.sort((a,b)=>a-b);
   thresholds=[1,2,3,4,5,6].map(k=>all[Math.min(all.length-1,Math.floor(all.length*k/7))]);
   return v=>{let k=0;for(const t of thresholds)if(v>=t)k++;return SEQ[k]};
 }
 const colorOf=(sc,r)=>st.metric==='yoy'?sc(yoy(r,st.m)):sc(val(r,st.m));
 
 /* ---------- 카카오맵 ---------- */
-let map=null,overlay=null,shapes=[];
+let map=null,overlay=null,layers={sido:[],sgg:[]};
 function loadKakao(){
   const el=document.getElementById('map');
-  if(!KAKAO_JS_KEY||KAKAO_JS_KEY.startsWith('__')){el.innerHTML='<div class="nokey">카카오 JavaScript 키를 넣으면 여기에 지도가 보여요.<br>(파일 위쪽 KAKAO_JS_KEY)</div>';return}
+  if(!KAKAO_JS_KEY||KAKAO_JS_KEY.startsWith('__')){el.innerHTML='<div class="nokey">카카오 JavaScript 키를 넣으면 여기에 지도가 보여요.<br>(파일 위쪽 KAKAO_JS_KEY)</div>';st.visible=D.sido.slice();refreshPanel();return}
   const s=document.createElement('script');
   s.src='https://dapi.kakao.com/v2/maps/sdk.js?autoload=false&appkey='+encodeURIComponent(KAKAO_JS_KEY);
   s.onload=()=>kakao.maps.load(initMap);
@@ -177,51 +193,55 @@ function loadKakao(){
   document.head.appendChild(s);
 }
 function initMap(){
-  const el=document.getElementById('map');
-  map=new kakao.maps.Map(el,{center:new kakao.maps.LatLng(36.3,127.8),level:13});
+  map=new kakao.maps.Map(document.getElementById('map'),{center:new kakao.maps.LatLng(36.3,127.8),level:12});
   map.addControl(new kakao.maps.ZoomControl(),kakao.maps.ControlPosition.RIGHT);
   overlay=new kakao.maps.CustomOverlay({yAnchor:0,xAnchor:0,zIndex:5});
-  drawShapes(true);
+  layers.sido=build(fSido,sidoRow);layers.sgg=build(fSgg,sggRow);
+  kakao.maps.event.addListener(map,'idle',onIdle);
+  fitKorea();
 }
-function ringsOf(f){
-  const g=f.geometry,polys=g.type==='Polygon'?[g.coordinates]:g.coordinates;
-  return polys.map(p=>p.map(ring=>ring.map(([x,y])=>new kakao.maps.LatLng(y,x))));
+function build(fs,rowMap){
+  return fs.map(f=>{const r=rowMap[f.properties.c];if(!r)return null;
+    const polys=f.polys.map(p=>{
+      const poly=new kakao.maps.Polygon({path:p.map(ring=>ring.map(([x,y])=>new kakao.maps.LatLng(y,x))),strokeWeight:1,strokeColor:'#ffffff',strokeOpacity:.9,fillColor:'#cde2fb',fillOpacity:.66});
+      kakao.maps.event.addListener(poly,'mouseover',()=>hover(r,true));
+      kakao.maps.event.addListener(poly,'mouseout',()=>{hover(r,false);overlay.setMap(null)});
+      kakao.maps.event.addListener(poly,'mousemove',e=>showTip(r,e.latLng));
+      kakao.maps.event.addListener(poly,'click',()=>pick(r,f));
+      return poly});
+    return {r,f,polys,on:false}}).filter(Boolean);
 }
-function drawShapes(fit){
-  if(!map)return;
-  shapes.forEach(s=>s.polys.forEach(p=>p.setMap(null)));shapes=[];overlay.setMap(null);
-  const fs=st.sido?fSgg.filter(f=>f.properties.sido===st.sido):fSido;
-  const sc=scale(),bounds=new kakao.maps.LatLngBounds();
-  fs.forEach(f=>{
-    const r=st.sido?sggRow[f.properties.c]:sidoRow[f.properties.c];if(!r)return;
-    const polys=ringsOf(f).map(path=>{
-      const p=new kakao.maps.Polygon({map,path,strokeWeight:1,strokeColor:'#ffffff',strokeOpacity:.9,fillColor:colorOf(sc,r),fillOpacity:.68});
-      kakao.maps.event.addListener(p,'mouseover',()=>hover(r,true));
-      kakao.maps.event.addListener(p,'mouseout',()=>{hover(r,false);overlay.setMap(null)});
-      kakao.maps.event.addListener(p,'mousemove',e=>showTip(r,e.latLng));
-      kakao.maps.event.addListener(p,'click',()=>pick(r));
-      return p;
-    });
-    if(fit&&!['28720','47940'].includes(r.c))path0(f).forEach(ll=>bounds.extend(ll));
-    shapes.push({r,polys});
-  });
-  if(fit)map.setBounds(bounds,20,20,20,20);
-  restyle();
+function fitKorea(){
+  const b=new kakao.maps.LatLngBounds();
+  fSido.forEach(f=>{b.extend(new kakao.maps.LatLng(f.bb[1],f.bb[0]));b.extend(new kakao.maps.LatLng(f.bb[3],f.bb[2]))});
+  map.setBounds(b,10,10,10,10);
 }
-function path0(f){return ringsOf(f).flatMap(p=>p[0])}
-function hover(r,on){const s=shapes.find(x=>x.r===r);if(!s)return;s.polys.forEach(p=>p.setOptions({strokeWeight:on?3:(st.sel===r?3:1),strokeColor:on||st.sel===r?'#111111':'#ffffff',fillOpacity:on?.82:.68}))}
+function onIdle(){
+  const want=map.getLevel()<=SGG_LEVEL?'sgg':'sido';
+  if(want!==st.layer){layers[st.layer].forEach(s=>{s.polys.forEach(p=>p.setMap(null));s.on=false});st.layer=want}
+  layers[st.layer].forEach(s=>{if(!s.on){s.polys.forEach(p=>p.setMap(map));s.on=true}});
+  const b=map.getBounds(),sw=b.getSouthWest(),ne=b.getNorthEast();
+  const inView=([x,y])=>x>=sw.getLng()&&x<=ne.getLng()&&y>=sw.getLat()&&y<=ne.getLat();
+  let vis=layers[st.layer].filter(s=>inView(s.f.pt));
+  if(!vis.length)vis=layers[st.layer].filter(s=>s.f.bb[0]<=ne.getLng()&&s.f.bb[2]>=sw.getLng()&&s.f.bb[1]<=ne.getLat()&&s.f.bb[3]>=sw.getLat());
+  st.visible=vis.map(s=>s.r);st.sel=null;overlay.setMap(null);
+  restyle();refreshPanel();legend();
+}
+function hover(r,on){const s=layers[st.layer].find(x=>x.r===r);if(!s)return;const sel=st.sel===r;s.polys.forEach(p=>p.setOptions({strokeWeight:on||sel?3:1,strokeColor:on||sel?'#111111':'#ffffff',fillOpacity:on?.82:.66}))}
 function restyle(){
-  if(!map)return;const sc=scale();
-  shapes.forEach(s=>{const sel=st.sel===s.r;s.polys.forEach(p=>p.setOptions({fillColor:colorOf(sc,s.r),strokeWeight:sel?3:1,strokeColor:sel?'#111111':'#ffffff'}))});
+  if(!map)return;const sc=scale(),vis=new Set(st.visible);
+  layers[st.layer].forEach(s=>{const sel=st.sel===s.r;s.polys.forEach(p=>p.setOptions({fillColor:colorOf(sc,s.r),strokeWeight:sel?3:1,strokeColor:sel?'#111111':'#ffffff',fillOpacity:vis.has(s.r)?.66:.4}))});
 }
 function showTip(r,latLng){
   const i=st.m;
-  overlay.setContent(`<div class="tipbox"><b>${r.n}</b>${r.kind==='sgg'?' <span style="color:#7d8590">'+sidoName[r.s]+'</span>':''}<br>${mlabel(i)} · ${typeLabel()}<br><span class="tv">${fmt(val(r,i))}명</span> · 작년 대비 <span class="tv">${pct(yoy(r,i))}</span></div>`);
+  overlay.setContent(`<div class="tipbox"><b>${r.n}</b>${r.kind==='sgg'?' <span style="color:#7d8590">'+sidoName[r.s]+'</span>':''}<br>${mlabel(i)} · ${typeLabel()}<br><span class="tv">${fmt(val(r,i))}명</span> · 작년 대비 <span class="tv">${pct(yoy(r,i))}</span><br><span style="color:#7d8590">누르면 이 지역 상세</span></div>`);
   overlay.setPosition(latLng);overlay.setMap(map);
 }
-function pick(r){
-  if(r.kind==='sido'&&!st.sido){st.sido=r.c;st.sel=r;crumbs();drawShapes(true);side();rank();legend();return}
-  st.sel=r;restyle();side();
+function pick(r){if(r.kind==='sido'&&map){zoomTo(r);return}st.sel=r;restyle();refreshPanel()}
+function zoomTo(r){
+  const f=(r.kind==='sgg'?fSgg:fSido).find(x=>x.properties.c===r.c);if(!f||!map){st.sel=r;refreshPanel();return}
+  const b=new kakao.maps.LatLngBounds();b.extend(new kakao.maps.LatLng(f.bb[1],f.bb[0]));b.extend(new kakao.maps.LatLng(f.bb[3],f.bb[2]));
+  map.setBounds(b,20,20,20,20);
 }
 
 /* ---------- 패널 ---------- */
@@ -229,20 +249,29 @@ function legend(){
   const el=document.getElementById('legend');
   if(st.metric==='yoy'){el.innerHTML=`<span>작년 같은 달보다</span><div><div class="bins">${DIV.map(c=>`<span style="background:${c}"></span>`).join('')}</div><div class="ticks"><span>+20%↑</span><span>±3%</span><span>-20%↓</span></div></div>`;return}
   scale();
-  el.innerHTML=`<span>월 방문자수</span><div><div class="bins">${SEQ.map(c=>`<span style="background:${c}"></span>`).join('')}</div><div class="ticks"><span>적음</span><span>${fmt(thresholds[2])}</span><span>${fmt(thresholds[5])}+</span></div></div><span style="color:var(--ink3)">7단계, ${st.sido?'이 시·도 안에서':'전국 시·도 기준'} 24개월 분포로 나눔</span>`;
+  el.innerHTML=`<span>월 방문자수</span><div><div class="bins">${SEQ.map(c=>`<span style="background:${c}"></span>`).join('')}</div><div class="ticks"><span>적음</span><span>${fmt(thresholds[2])}</span><span>${fmt(thresholds[5])}+</span></div></div><span style="color:var(--ink3)">7단계, 전국 ${st.layer==='sgg'?'시·군·구':'시·도'} 24개월 분포로 나눔</span>`;
 }
 function crumbs(){
-  const el=document.getElementById('crumbs');
-  el.innerHTML=st.sido?`<button type="button" id="back">← 전국</button><b>${sidoName[st.sido]}</b><span class="hint">시·군·구를 누르면 상세가 바뀝니다</span>`:`<b>전국 17개 시·도</b><span class="hint">시·도를 누르면 시·군·구로 들어갑니다</span>`;
-  const b=document.getElementById('back');if(b)b.onclick=()=>{st.sido=null;st.sel=null;crumbs();drawShapes(true);side();rank();legend()};
+  const n=st.visible.length,unit=st.layer==='sgg'?'시·군·구':'시·도';
+  document.getElementById('crumbs').innerHTML=`<b>지금 보이는 ${unit} ${n}곳</b><button type="button" id="home">전국 보기</button><span class="hint">지도를 움직이면 오른쪽 통계가 바뀌어요 · 확대하면 시·군·구로 나뉘어요</span>`;
+  document.getElementById('home').onclick=()=>{if(map)fitKorea()};
 }
 function sumRows(rs){const o=M.map(()=>[0,0,0]);rs.forEach(r=>r.v.forEach((x,i)=>{o[i][0]+=x[0];o[i][1]+=x[1];o[i][2]+=x[2]}));return o}
+function viewName(){
+  const vs=st.visible;if(!vs.length)return '보이는 지역 없음';
+  if(vs.length===1)return vs[0].kind==='sgg'?sidoName[vs[0].s]+' '+vs[0].n:vs[0].n;
+  if(st.layer==='sido')return vs.length===D.sido.length?'전국':vs.slice(0,3).map(r=>r.n.replace(/(특별자치시|특별자치도|특별시|광역시|도)$/,'')).join('·')+(vs.length>3?` 외 ${vs.length-3}곳`:'');
+  const sidos=[...new Set(vs.map(r=>r.s))];
+  return sidos.length===1?`${sidoName[sidos[0]]} ${vs.length}개 시·군·구`:`${sidos.length}개 시·도의 ${vs.length}개 시·군·구`;
+}
 function side(){
-  const r=st.sel||{n:'전국',kind:'total',v:sumRows(D.sido)};
+  const r=st.sel||{n:viewName(),kind:'view',v:sumRows(st.visible)};
   const i=st.m,v=val(r,i),y=yoy(r,i),mm=mom(r,i),raw=r.v[i],tot=raw[0]+raw[1]+raw[2]||1;
   const cols=['#6da7ec','#184f95','#c8443b'];
-  document.getElementById('region').innerHTML=`<div class="kind">${r.kind==='sgg'?sidoName[r.s]+' · 시·군·구':r.kind==='sido'?'시·도':'합계'} · ${mlabel(i)}</div>
+  const kind=r.kind==='view'?`지금 지도에 보이는 지역 합계 · ${mlabel(i)}`:`${r.kind==='sgg'?sidoName[r.s]+' · 시·군·구':'시·도'} · ${mlabel(i)}`;
+  document.getElementById('region').innerHTML=`<div class="kind">${kind}</div>
   <h2>${r.n}</h2>
+  ${st.sel?'<button type="button" class="backsum" id="backsum">← 보이는 지역 합계로</button>':''}
   <div class="big">${fmt(v)}<small>명 (${typeLabel()})</small></div>
   <div class="chips"><span class="chip ${mm>0?'up':mm<0?'down':''}">전월 대비 ${pct(mm)}</span><span class="chip ${y>0?'up':y<0?'down':''}">작년 같은 달 대비 ${pct(y)}</span></div>
   <div class="h3">방문자 구성</div>
@@ -250,7 +279,9 @@ function side(){
   <div class="mixlab">${raw.map((x,k)=>`<span><i style="background:${cols[k]}"></i>${TYPES[k]} ${(x/tot*100).toFixed(1)}%</span>`).join('')}</div>
   <div class="h3">최근 24개월 추이</div>
   <svg id="trend" role="img" aria-label="24개월 방문자 막대그래프"></svg>
-  ${r.note?`<p class="note">${r.note}</p>`:''}`;
+  ${r.note?`<p class="note">${r.note}</p>`:''}
+  ${r.kind==='view'&&st.visible.length>1?'<p class="note">여러 지역을 더한 값이라, 하루에 두 지역을 다닌 사람은 두 번 셉니다.</p>':''}`;
+  const b=document.getElementById('backsum');if(b)b.onclick=()=>{st.sel=null;restyle();refreshPanel()};
   trend(r);
 }
 function trend(r){
@@ -269,19 +300,19 @@ function trend(r){
     el.onmouseleave=()=>tip.hidden=true;el.onclick=()=>setMonth(i)});
 }
 function rank(){
-  const i=st.m,rs=rows().slice(),key=st.metric==='yoy'?(r=>yoy(r,i)??-9):(r=>val(r,i));
+  const i=st.m,rs=st.visible.slice(),key=st.metric==='yoy'?(r=>yoy(r,i)??-9):(r=>val(r,i));
   rs.sort((a,b)=>key(b)-key(a));const top=rs.slice(0,10),mx=Math.max(...top.map(r=>Math.abs(key(r))))||1;
-  document.getElementById('rankTitle').textContent=`${st.metric==='yoy'?'작년보다 많이 늘어난 곳':'방문자가 많은 곳'} TOP 10 · ${st.sido?sidoName[st.sido]:'전국 시·도'}`;
+  document.getElementById('rankTitle').textContent=`${st.metric==='yoy'?'작년보다 많이 늘어난 곳':'방문자가 많은 곳'} TOP ${Math.min(10,rs.length)} · 지금 보이는 ${st.layer==='sgg'?'시·군·구':'시·도'}`;
   const ol=document.getElementById('rank');ol.innerHTML='';
+  if(!rs.length){ol.innerHTML='<li style="cursor:default;color:var(--ink3)">지도를 움직여 지역이 보이게 해 주세요</li>';return}
   top.forEach((r,k)=>{const li=document.createElement('li');li.tabIndex=0;const kv=key(r);
-    li.innerHTML=`<span class="no">${k+1}</span><span class="nm">${r.n}</span><span class="val">${st.metric==='yoy'?pct(yoy(r,i)):fmt(kv)}</span><span class="bar" style="width:${Math.max(2,Math.abs(kv)/mx*100)}%"></span>`;
+    li.innerHTML=`<span class="no">${k+1}</span><span class="nm">${r.kind==='sgg'&&new Set(st.visible.map(x=>x.s)).size>1?sidoName[r.s].replace(/(특별자치시|특별자치도|특별시|광역시|도)$/,'')+' ':''}${r.n}</span><span class="val">${st.metric==='yoy'?pct(yoy(r,i)):fmt(kv)}</span><span class="bar" style="width:${Math.max(2,Math.abs(kv)/mx*100)}%"></span>`;
     li.onclick=()=>pick(r);li.onkeydown=e=>{if(e.key==='Enter')pick(r)};ol.appendChild(li)});
 }
+function refreshPanel(){crumbs();side();rank()}
 function setMonth(i){st.m=i;slider.value=i;document.getElementById('mlabel').textContent=mlabel(i);restyle();side();rank();if(st.metric==='yoy')legend()}
 const slider=document.getElementById('slider');
 slider.oninput=()=>setMonth(+slider.value);
-function seg(id,k,after){document.querySelectorAll('#'+id+' button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#'+id+' button').forEach(x=>x.setAttribute('aria-pressed',x===b));st[k]=b.dataset.v;after&&after();restyle();side();rank();legend()})}
-function typeLabel(){return st.types.length===3?'전체':st.types.map(k=>TYPES[k]).join('+')}
 document.querySelectorAll('#segType button').forEach(b=>b.onclick=()=>{
   const v=b.dataset.v;
   if(v==='all')st.types=[0,1,2];
@@ -290,16 +321,22 @@ document.querySelectorAll('#segType button').forEach(b=>b.onclick=()=>{
     else if(has){if(st.types.length>1)st.types=st.types.filter(x=>x!==k)}
     else st.types=[...st.types,k].sort();}
   document.querySelectorAll('#segType button').forEach(x=>x.setAttribute('aria-pressed',x.dataset.v==='all'?st.types.length===3:(st.types.length<3&&st.types.includes(+x.dataset.v))));
-  restyle();side();rank();legend();});
-seg('segMetric','metric',()=>{slider.min=st.metric==='yoy'?12:0;if(st.m<+slider.min)setMonth(+slider.min)});
+  restyle();side();rank();legend()});
+document.querySelectorAll('#segMetric button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#segMetric button').forEach(x=>x.setAttribute('aria-pressed',x===b));st.metric=b.dataset.v;
+  slider.min=st.metric==='yoy'?12:0;if(st.m<+slider.min)setMonth(+slider.min);
+  restyle();side();rank();legend()});
 document.getElementById('play').onclick=function(){
   if(st.timer){clearInterval(st.timer);st.timer=null;this.textContent='▶';return}
   this.textContent='❚❚';if(st.m>=NM-1)setMonth(+slider.min);
   st.timer=setInterval(()=>{if(st.m>=NM-1){clearInterval(st.timer);st.timer=null;document.getElementById('play').textContent='▶';return}setMonth(st.m+1)},1000);
 };
 addEventListener('resize',()=>side());
-crumbs();setMonth(NM-1);legend();loadKakao();
+st.visible=D.sido.slice();
+document.getElementById('mlabel').textContent=mlabel(st.m);
+refreshPanel();legend();loadKakao();
 })();
 </script>
 </body>
+
 </html>
